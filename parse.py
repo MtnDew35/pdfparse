@@ -4,8 +4,10 @@ from typing import TypeVar, Union, Generic
 import fitz
 import json
 import re
+import os
 
-def get_tag(element: str) -> tuple[str, str]:
+
+def get_tag(element: str): # -> tuple[str, str]:
     """Returns the tag for the element and the remaining text.
     :param element: element to get tag for
     :type element: str
@@ -16,13 +18,15 @@ def get_tag(element: str) -> tuple[str, str]:
     if "<" in element and ">" in element:
         res = re.findall(re_pattern, element)
         tag: str = str(res[0].replace("<", "").replace(">", ""))
-        line: str = re.sub(re_pattern, "", element)
-        return (tag, line)
+        line: str = re.sub(re_pattern, "", element, count=1)
+        return tag, line
     else:
-        return ("", element)
+        return "", element
 
 
 T = TypeVar('T')
+
+
 class Note(dict, Generic[T]):
     def __init__(self, tag, value):
         self.tag = tag
@@ -37,7 +41,7 @@ class Note(dict, Generic[T]):
 
     def toJSON(self):
         return json.dumps(self.__dict__, default=lambda o: o.__dict__,
-            sort_keys=True, indent=4)
+                          sort_keys=True, indent=4)
 
     def __dict__(self):
         return {'note': self.value, 'tag': self.tag}
@@ -54,6 +58,7 @@ class Element(dict, Generic[T]):
     :param notes: the notes of the element
     :type notes: list
     """
+
     def __init__(self, element: str, max_header: int, root_header):
         (tag, line) = get_tag(element)
         self.in_list = False
@@ -83,20 +88,24 @@ class Element(dict, Generic[T]):
         """Adds a child to the element.
         :param element: the raw child to add
         """
+
         def add_as_child(parent, element):
             element.set_parent(parent)
             parent.add_child(element)
             return element
 
-        if self.parent is None: # if this is the root element
+        if self.parent is None:  # if this is the root element
             return add_as_child(self, element)
 
-        if self.header_size < element.header_size: # if the child is a larger header
+        if self.header_size < element.header_size:  # if the child is a larger header
             return add_as_child(self, element)
 
         current = self.parent
-        while(current.parent is not None and current.header_size < element.header_size): # if the child is a smaller header
-            current = current.parent
+        # Removed to fix bug paragraph to low header bug
+        '''while (
+                current.parent is not None and current.header_size < element.header_size):
+            # if the child is a smaller header
+            current = current.parent'''
 
         if current.header_size == element.header_size and current.parent is not None:
             element.parent = current.parent
@@ -106,8 +115,6 @@ class Element(dict, Generic[T]):
         element.parent = current
         current.children.append(element)
 
-
-
     def is_root_in_list(self):
         return self.get_root().in_list
 
@@ -116,12 +123,12 @@ class Element(dict, Generic[T]):
         root.in_list = True
 
     def get_root(self):
-        iter = self
+        iteration = self
         count = 0
-        while iter.parent is not None:
+        while iteration.parent is not None:
             count += 1
-            iter = iter.parent
-        return iter
+            iteration = iteration.parent
+        return iteration
 
     def add_note(self, note: str, tag: str):
         if any(map(tag.__contains__, self.drop_tag_list)):
@@ -130,8 +137,9 @@ class Element(dict, Generic[T]):
         self.notes.append(Note(tag, note))
 
     def include_tag(self):
-        if self.tag == 'h1':
-            return False
+        # Removed to allow h1 to be a folder
+        #  if self.tag == 'h1':
+        #    return False
         return 'h' in self.tag or self.is_paragraph()
 
     def is_paragraph(self):
@@ -150,7 +158,7 @@ class Element(dict, Generic[T]):
 
     def toJSON(self):
         return json.dumps(self.__dict__, default=lambda o: o.__dict__,
-            sort_keys=True, indent=4)
+                          sort_keys=True, indent=4)
 
     def __dict__(self):
         return {
@@ -160,28 +168,31 @@ class Element(dict, Generic[T]):
             'notes': self.notes
         }
 
+
 def add_node(json_arrays: list, node: Element):
     if not node.is_root_in_list():
         node.set_root_in_list()
         json_arrays.append(node.get_root())
     return json_arrays
 
-def make_nested_json(elements, max_header=6, root_header="h2", drop_tags=[]) -> tuple[ list[Element], list[Element] ]:
+
+def make_nested_json(elements, max_header=6, root_header="h1", drop_tags=[]) -> tuple[list[Element], list[Element]]:
     """Turns an element array into a nested json array with h1 as root"""
     element_list: list[Element] = []
     json_arrays: list[Element] = []
+
     def keep_going():
         return len(elements) > 0
 
     def get_next_to_include():
         scan = Element(elements.pop(0), max_header, root_header)
-        while(scan.exclude_tag()  and keep_going()):
+        while scan.exclude_tag() and keep_going():
             raw = elements.pop(0)
             scan = Element(raw, max_header, root_header)
         return scan
 
     last = None
-    while(keep_going()):
+    while keep_going():
         element = get_next_to_include()
         if len(drop_tags) > 0:
             element.drop_tags(drop_tags)
@@ -196,7 +207,7 @@ def make_nested_json(elements, max_header=6, root_header="h2", drop_tags=[]) -> 
             element_list.append(element)
             last.add_header_element(element)
             last = element
-    return (json_arrays, element_list)
+    return json_arrays, element_list
 
 
 def fonts(doc, granularity=False):
@@ -212,7 +223,7 @@ def fonts(doc, granularity=False):
     font_counts = {}
 
     for page in doc:
-        blocks = page.get_text("dict")["blocks"] # get all text blocks
+        blocks = page.get_text("dict")["blocks"]  # get all text blocks
         for b in blocks:  # iterate through the text blocks
             if b['type'] == 0:  # block contains text
                 for l in b["lines"]:  # iterate through the text lines
@@ -220,24 +231,24 @@ def fonts(doc, granularity=False):
                         if granularity:
                             identifier = "{0}_{1}_{2}_{3}".format(s['size'], s['flags'], s['font'], s['color'])
                             styles[identifier] = {'size': s['size'], 'flags': s['flags'], 'font': s['font'],
-                                                  'color': s['color']} # store style information
+                                                  'color': s['color']}  # store style information
                         else:
-                            identifier = "{0}".format(s['size']) # store font size
-                            styles[identifier] = {'size': s['size'], 'font': s['font']} # store style information
+                            identifier = "{0}".format(s['size'])  # store font size
+                            styles[identifier] = {'size': s['size'], 'font': s['font']}  # store style information
 
                         font_counts[identifier] = font_counts.get(identifier, 0) + 1  # count the fonts usage
 
-    font_counts = sorted(font_counts.items(), key=itemgetter(1), reverse=True) # sort by count
+    font_counts = sorted(font_counts.items(), key=itemgetter(1), reverse=True)  # sort by count
 
-    if len(font_counts) < 1: # no fonts found
-        raise ValueError("Zero discriminating fonts found!") # check if there are any discriminating fonts
+    if len(font_counts) < 1:  # no fonts found
+        raise ValueError("Zero discriminating fonts found!")  # check if there are any discriminating fonts
 
     return font_counts, styles
 
 
 def font_tags(font_counts, styles):
     """Returns dictionary with font sizes as keys and tags as value.
-    :param font_counts: (font_size, count) for all fonts occuring in document
+    :param font_counts: (font_size, count) for all fonts occurring in document
     :type font_counts: list
     :param styles: all styles found in the document
     :type styles: dict
@@ -249,24 +260,24 @@ def font_tags(font_counts, styles):
 
     # sorting the font sizes high to low, so that we can append the right integer to each tag
     font_sizes = []
-    for (font_size, count) in font_counts: # iterate through the font counts
-        font_sizes.append(float(font_size)) # append font size to list
-    font_sizes.sort(reverse=True) # sort the list in descending order
+    for (font_size, count) in font_counts:  # iterate through the font counts
+        font_sizes.append(float(font_size))  # append font size to list
+    font_sizes.sort(reverse=True)  # sort the list in descending order
 
     # aggregating the tags for each font size
     idx = 0
     size_tag = {}
-    for size in font_sizes: # iterate through the font sizes
+    for size in font_sizes:  # iterate through the font sizes
         idx += 1
-        if size == p_size: # if the font size is the same as the paragraph's size
-            idx = 0 # reset the index
-            size_tag[size] = '<p>' # append paragraph tag
-        if size > p_size: # if the font size is bigger than the paragraph's size
-            size_tag[size] = '<h{0}>'.format(idx) # append header tag
-        elif size < p_size: # if the font size is smaller than the paragraph's size
-            size_tag[size] = '<s{0}>'.format(idx) # append subheader tag
+        if size == p_size:  # if the font size is the same as the paragraph's size
+            idx = 0  # reset the index
+            size_tag[size] = '<p>'  # append paragraph tag
+        if size > p_size:  # if the font size is bigger than the paragraph's size
+            size_tag[size] = '<h{0}>'.format(idx)  # append header tag
+        elif size < p_size:  # if the font size is smaller than the paragraph's size
+            size_tag[size] = '<s{0}>'.format(idx)  # append sub-header tag
 
-    return size_tag #  return header_para
+    return size_tag  # return header_para
 
 
 def headers_para(doc, size_tag):
@@ -276,7 +287,7 @@ def headers_para(doc, size_tag):
     :param size_tag: textual element tags for each size
     :type size_tag: dict
     :rtype: list
-    :return: texts with pre-prended element tags
+    :return: texts with pre-pended element tags
     """
     header_para = []  # list with headers and paragraphs
     first = True  # boolean operator for first header
@@ -291,8 +302,9 @@ def headers_para(doc, size_tag):
 
                 block_string = ""  # text found in block
                 for l in b["lines"]:  # iterate through the text lines
+                    #  Bold handing here?
                     for s in l["spans"]:  # iterate through the text spans
-                        # if the last two characters in bockstring are spaces,
+                        # if the last two characters in block-string are spaces,
                         # remove one
                         if s['text'].strip():  # removing whitespaces:
                             if first:
@@ -320,6 +332,8 @@ def headers_para(doc, size_tag):
                     # new block started, indicating with a pipe
                     # block_string += "|"
 
+                # replace triple spaces with new line
+                block_string = block_string.replace('   ', '</p>')
                 # remove any double spaces
                 block_string = block_string.replace("  ", " ")
                 # only append if block_string is not empty
@@ -327,6 +341,7 @@ def headers_para(doc, size_tag):
                     header_para.append(block_string)
 
     return header_para
+
 
 # when passed an element array, build a dictionary of all the elements
 def build_dict(elements):
@@ -342,6 +357,7 @@ def build_dict(elements):
             res = re.findall(r'\<.*?\>', element)
             if "h" in res[0]:
                 print(res)
+
 
 def reverse_notes(flat):
     for node in flat:
@@ -366,26 +382,27 @@ def main():
 
     args = parser.parse_args()
     input_file = args.input
-    output_file = f"output/{(input_file.split('.')[0] + '.json').split('/')[-1]}"
+    filename = os.path.basename(input_file)
+    output_file = f"output/{(filename.split('.')[0] + '.json').split('/')[-1]}"
 
     doc = fitz.open(input_file)
 
-    font_counts, styles = fonts(doc, granularity=False) # get font counts and styles
+    font_counts, styles = fonts(doc, granularity=False)  # get font counts and styles
 
-    size_tag = font_tags(font_counts, styles) # get font tags
+    size_tag = font_tags(font_counts, styles)  # get font tags
 
-    elements = headers_para(doc, size_tag) # get headers and paragraphs
+    elements = headers_para(doc, size_tag)  # get headers and paragraphs
 
     # get the root header
-    root_header = args.root or "h2"
+    root_header = args.root or "h1"
 
     # get the max header
-    max_header = 6 if args.max == None else int(args.max)
+    max_header = 6 if args.max is None else int(args.max)
 
     # parse drop tag csv into a list
     drop_tags = args.drop.split(',') if args.drop else []
 
-    (nested, flat)= make_nested_json(elements, max_header, root_header, drop_tags)
+    (nested, flat) = make_nested_json(elements, max_header, root_header, drop_tags)
 
     # if note reversal is enabled, reverse the reverse_notes
     if args.reverse:
@@ -397,10 +414,15 @@ def main():
     # for element in elements:
     #     print(element.value)
 
-    print(f'Writing to {output_file} [{len(nested)}] elements')
-    with open(output_file, 'w') as json_out: # write to json file
-        json.dump(nested, json_out, indent=4) # dump the elements to json file
+    # print(f'Writing to {output_file} [{len(nested)}] elements')
+    with open(output_file, 'w') as json_out:  # write to json file
+        json.dump(nested, json_out, indent=4)  # dump the elements to json file
 
 
 if __name__ == '__main__':
     main()
+
+    #  TODO: Add bold and itallic flag processing (add except for flag to add html around text) Bold == 16 Itallic == 2
+    #  TODO: Change newline from HTML to universal (split into new element at newline)
+    #  TODO: Table Processing
+    #  TODO: Image Processing
