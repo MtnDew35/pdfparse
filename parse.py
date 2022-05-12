@@ -101,11 +101,6 @@ class Element(dict, Generic[T]):
             return add_as_child(self, element)
 
         current = self.parent
-        # Removed to fix bug paragraph to low header bug
-        '''while (
-                current.parent is not None and current.header_size < element.header_size):
-            # if the child is a smaller header
-            current = current.parent'''
 
         if current.header_size == element.header_size and current.parent is not None:
             element.parent = current.parent
@@ -307,6 +302,10 @@ def headers_para(doc, size_tag):
                         # if the last two characters in block-string are spaces,
                         # remove one
                         if s['text'].strip():  # removing whitespaces:
+                            if 'Bold' in s['font']:  # handle bold
+                                s['text'] = '<strong>' + s['text'] + '</strong>'  # append tag to beginning and end
+                            if 'Italic' in s['font']:  # handle italics
+                                s['text'] = '<em>' + s['text'] + '</em>'  # append tag to beginning and end
                             if first:
                                 previous_s = s
                                 first = False
@@ -422,7 +421,6 @@ def main():
 if __name__ == '__main__':
     main()
 
-    #  TODO: Add bold and itallic flag processing (add except for flag to add html around text) Bold == 16 Itallic == 2
     #  TODO: Change newline from HTML to universal (split into new element at newline)
     #  TODO: Table Processing
     #  TODO: Image Processing
