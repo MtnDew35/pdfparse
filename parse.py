@@ -6,8 +6,42 @@ import json
 import re
 import os
 
+html_dict = {
+    'bold': '<strong>',
+    'bold_end': '</strong>',
+    'italic': '<em>',
+    'italic_end': '</em>',
+    'superscript': '<sup>',
+    'superscript_end': '</sup>',
+    'subscript': '<sub>',  # Working on adding PDF detection
+    'underline': '<u>',  # Working on adding PDF detection
+    'strikethrough': '<s>'  # Working on adding PDF detection
+}
 
-def get_tag(element: str): # -> tuple[str, str]:
+
+def font_handler(string, markup_language):
+    flag_list = []
+    if string['flags'] & 2 ** 0:
+        flag_list.append("superscript")
+    if string['flags'] & 2 ** 1:
+        flag_list.append("italic")
+    if string['flags'] & 2 ** 4:
+        flag_list.append("bold")
+
+    for type_font in flag_list:
+        match markup_language:
+            case None:
+                break
+            case "html" | "HTML":
+                if type_font in html_dict:
+                    string['text'] = html_dict[type_font] + string['text'] + html_dict[type_font + '_end']
+            case _:
+                print("Markup language not currently supported")
+                quit()
+    return string
+
+
+def get_tag(element: str):  # -> tuple[str, str]:
     """Returns the tag for the element and the remaining text.
     :param element: element to get tag for
     :type element: str
@@ -275,7 +309,7 @@ def font_tags(font_counts, styles):
     return size_tag  # return header_para
 
 
-def headers_para(doc, size_tag):
+def headers_para(doc, size_tag, markup_language):
     """Scrapes headers & paragraphs from PDF and return texts with element tags.
     :param doc: PDF document to iterate through
     :type doc: <class 'fitz.fitz.Document'>
@@ -297,15 +331,11 @@ def headers_para(doc, size_tag):
 
                 block_string = ""  # text found in block
                 for l in b["lines"]:  # iterate through the text lines
-                    #  Bold handing here?
-                    for s in l["spans"]:  # iterate through the text spans
+                    for index, s in enumerate(l["spans"]):  # iterate through the text spans
                         # if the last two characters in block-string are spaces,
                         # remove one
                         if s['text'].strip():  # removing whitespaces:
-                            if 'Bold' in s['font']:  # handle bold
-                                s['text'] = '<strong>' + s['text'] + '</strong>'  # append tag to beginning and end
-                            if 'Italic' in s['font']:  # handle italics
-                                s['text'] = '<em>' + s['text'] + '</em>'  # append tag to beginning and end
+                            font_handler(s, markup_language)  # handle text characteristics
                             if first:
                                 previous_s = s
                                 first = False
@@ -328,16 +358,22 @@ def headers_para(doc, size_tag):
 
                                 previous_s = s
 
-                    # new block started, indicating with a pipe
-                    # block_string += "|"
-
-                # replace triple spaces with new line
-                block_string = block_string.replace('   ', '</p>')
-                # remove any double spaces
-                block_string = block_string.replace("  ", " ")
                 # only append if block_string is not empty
                 if block_string:
-                    header_para.append(block_string)
+                    # break triple spaces into new paragrapgh sections
+                    if "   " in block_string:
+                        # remove tag and split into list
+                        block_list = re.sub(r'\<.*?\>', '', block_string, count=1).split('   ')
+                        for block in block_list:
+                            # add tag back in on each new paragraph
+                            block = "<p>" + block
+                            # remove any double spaces
+                            block = block.replace("  ", " ")
+                            header_para.append(block)
+                    else:
+                        # remove any double spaces
+                        block_string = block_string.replace("  ", " ")
+                        header_para.append(block_string)
 
     return header_para
 
@@ -379,10 +415,15 @@ def main():
     # add param to pass csv of tags to drop
     parser.add_argument('-d', '--drop', help='drop tags', required=False)
 
+    # add param to determine markup type
+    parser.add_argument('-l', '--language', help='markup language', required=False)
+
     args = parser.parse_args()
     input_file = args.input
     filename = os.path.basename(input_file)
     output_file = f"output/{(filename.split('.')[0] + '.json').split('/')[-1]}"
+
+    markup_language = args.language or None
 
     doc = fitz.open(input_file)
 
@@ -390,7 +431,7 @@ def main():
 
     size_tag = font_tags(font_counts, styles)  # get font tags
 
-    elements = headers_para(doc, size_tag)  # get headers and paragraphs
+    elements = headers_para(doc, size_tag, markup_language)  # get headers and paragraphs
 
     # get the root header
     root_header = args.root or "h1"
@@ -421,6 +462,4 @@ def main():
 if __name__ == '__main__':
     main()
 
-    #  TODO: Change newline from HTML to universal (split into new element at newline)
     #  TODO: Table Processing
-    #  TODO: Image Processing
